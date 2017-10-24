@@ -7,10 +7,15 @@ Created on Thu Oct 19 12:09:25 2017
 # PART 1 - Importing data & libraries
 
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import SelectFromModel
 from sklearn.metrics import roc_auc_score
 import pandas as pd
 import numpy as np
+from sklearn.cross_validation import StratifiedKFold
+from sklearn.grid_search import GridSearchCV
+from sklearn.ensemble.gradient_boosting import GradientBoostingClassifier
+from sklearn.cross_validation import cross_val_score
 
 # Load & Combine datasets
 def combine_datasets():
@@ -40,10 +45,10 @@ def get_titles():
 
     global combined
     
-    # we extract the title from each name
+    # Extract title
     combined['Title'] = combined['Name'].map(lambda name:name.split(',')[1].split('.')[0].strip())
     
-    # a map of more aggregated titles
+    # Map of more Aggregated Titles
     Title_Dictionary = {
                         "Capt":       "Officer",
                         "Col":        "Officer",
@@ -143,7 +148,7 @@ def recover_train_test_target():
     return X, y, test
 X, y, test = recover_train_test_target()
 
-# PART 3 - Making the training model
+# PART 3 - Making the training model #### NOT NECESSARY, SKIP THIS
 
 # Training model
 model = RandomForestRegressor(n_estimators=1000,
@@ -156,22 +161,10 @@ model.fit(X,y)
 roc = roc_auc_score(y, model.oob_prediction_)
 print("C-stat :", roc)
 
-# Predict test
-
-output = model.predict(test)
-output = (output > 0.5)
-output=output*1
-df_output = pd.DataFrame()
-aux = pd.read_csv('test.csv')
-df_output['PassengerId'] = aux['PassengerId']
-df_output['Survived'] = output
-df_output[['PassengerId','Survived']].to_csv('output.csv',index=False)
-
-# PART 4 - Optimization ## Makes it worse for some unknown reason?
+# PART 4 - Optimization
 
 # Feature importance
 
-from sklearn.ensemble import RandomForestClassifier
 clf = RandomForestClassifier(n_estimators=50, max_features='sqrt')
 clf = clf.fit(X, y)
 
@@ -182,30 +175,50 @@ X_reduced.shape
 test_reduced = model.transform(test)
 test_reduced.shape
 
-# Training model on Reduced set
-model = RandomForestRegressor(n_estimators=1000,
-                              oob_score=True,
-                              n_jobs=-1,
-                              random_state=42,
-                              max_features="auto",
-                              min_samples_leaf=5)
-model.fit(X_reduced,y)
-roc = roc_auc_score(y, model.oob_prediction_)
-print("C-stat :", roc)
+# RandomTree parameter tuning
+run_gs = False
 
-# Predict test_reduced
-output_reduced = model.predict(test_reduced)
-output_reduced = (output_reduced > 0.5)
-output_reduced = output_reduced*1
-df_output_reduced = pd.DataFrame()
+if run_gs:
+    parameter_grid = {
+                 'max_depth' : [4, 6, 8],
+                 'n_estimators': [50, 10],
+                 'max_features': ['sqrt', 'auto', 'log2'],
+                 'min_samples_split': [1, 3, 10],
+                 'min_samples_leaf': [1, 3, 10],
+                 'bootstrap': [True, False],
+                 }
+    forest = RandomForestClassifier()
+    cross_validation = StratifiedKFold(y, n_folds=5)
+
+    grid_search = GridSearchCV(forest,
+                               scoring='accuracy',
+                               param_grid=parameter_grid,
+                               cv=cross_validation)
+
+    grid_search.fit(X, y)
+    model = grid_search
+    parameters = grid_search.best_params_
+
+    print('Best score: {}'.format(grid_search.best_score_))
+    print('Best parameters: {}'.format(grid_search.best_params_))
+else: 
+    parameters = {'bootstrap': False, 'min_samples_leaf': 3, 'n_estimators': 50, 
+                  'min_samples_split': 10, 'max_features': 'sqrt', 'max_depth': 6}
+    
+    model = RandomForestClassifier(**parameters)
+    model.fit(X, y)
+
+def compute_score(clf, X, y, scoring='accuracy'):
+    xval = cross_val_score(clf, X, y, cv = 5, scoring=scoring)
+    return np.mean(xval)
+
+compute_score(model, X, y, scoring='accuracy')
+
+
+output = model.predict(test).astype(int)
+df_output = pd.DataFrame()
 aux = pd.read_csv('test.csv')
-df_output_reduced['PassengerId'] = aux['PassengerId']
-df_output_reduced['Survived'] = output_reduced
-df_output_reduced[['PassengerId','Survived']].to_csv('output_reduced.csv',index=False)
-
-
-
-
-
-
+df_output['PassengerId'] = aux['PassengerId']
+df_output['Survived'] = output
+df_output[['PassengerId','Survived']].to_csv('output.csv',index=False)
 
